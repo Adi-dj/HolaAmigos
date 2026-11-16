@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from 'react';
 import Mixed from './Mixed';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { buildSteps, isExercise, starsFor } from '@/lib/exercises';
+import { buildSteps, isExercise, starsFor, shuffle } from '@/lib/exercises';
 import { speak, sfx, stopSpeaking } from '@/lib/speech';
 import * as X from './Exercises';
 
@@ -64,9 +64,10 @@ export default function LessonPlayer({ lesson, track, pool, nextLessonId }) {
       sfx.bad();
       setMistakes((m) => m + 1);
       // Try the same exercise again at the end of the lesson (once).
-      if (!requeued.current.has(step.id)) {
-        requeued.current.add(step.id);
-        setSteps((s) => [...s, { ...step, id: step.id + '-again' }]);
+      const base = step.baseId || step.id;
+      if (!requeued.current.has(base)) {
+        requeued.current.add(base);
+        setSteps((s) => [...s, { ...step, id: base + '-again', baseId: base, ...(Array.isArray(step.options) ? { options: shuffle(step.options) } : {}) }]);
       }
       const [es, he] = pick(OOPS);
       setFeedback({ ok: false, title: `${es} ${he}`, answer: answerText(step) });
