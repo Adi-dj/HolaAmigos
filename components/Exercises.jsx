@@ -1,7 +1,7 @@
 'use client';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import Mixed from './Mixed';
-import { speak, stopSpeaking, canRecognize, listen, sfx } from '@/lib/speech';
+import { speak, stopSpeaking, listen, cancelListening, speechMode, rememberSpeechMode, startRecording, playUrl, sfx } from '@/lib/speech';
 import { typedMatches, spokenMatches, norm } from '@/lib/text';
 import { shuffle } from '@/lib/exercises';
 
@@ -369,65 +369,126 @@ export function Build({ target, extra, onResult }) {
 }
 
 // ---------- Speaking ----------
+// Three modes (see lib/speech.js): live recognition, record & compare, or self-check.
 export function Speak({ target, young, onDone }) {
-  const supported = useMemo(() => canRecognize(), []);
-  const [state, setState] = useState('idle'); // idle | listening | ok | retry | fallback
+  const [mode, setMode] = useState(null); // decided on the client only
+  const [state, setState] = useState('idle'); // idle | listening | ok | retry | silent | recording | recorded
   const [tries, setTries] = useState(0);
   const [heard, setHeard] = useState('');
+  const [clip, setClip] = useState(null);
+  const recRef = useRef(null);
+  const alive = useRef(true);
   useAutoSpeak([[target.es, { rate: rate(young) }]], [target.es]);
+  useEffect(() => { setMode(speechMode()); }, []);
+  useEffect(() => () => {
+    alive.current = false;
+    cancelListening();
+    try { recRef.current?.stop(); } catch {}
+  }, []);
+  useEffect(() => () => { if (clip) URL.revokeObjectURL(clip); }, [clip]);
 
-  const go = async () => {
+  const toRecordMode = () => { const m = speechMode(); setMode(m === 'recognize' ? 'record' : m); setState('idle'); };
+
+  // --- live recognition ---
+  const recognize = async () => {
     setState('listening'); setHeard('');
     try {
       const res = await listen({ lang: 'es-ES', timeoutMs: 6000 });
+      if (!alive.current) return;
       if (!res.length) { setTries((t) => t + 1); setState('silent'); return; }
       const m = spokenMatches(res, target.es);
       setHeard(res[0] || '');
-      if (m.ok) { sfx.good(); setState('ok'); speak('¡Muy bien!'); }
+      if (m.ok) { sfx.good(); setState('ok'); setTimeout(() => speak('¡Muy bien!'), 300); }
       else { setTries((t) => t + 1); setState('retry'); }
     } catch (e) {
-      // Permission denied / unsupported in this mode, so switch to self-check
-      setState('fallback');
+      if (!alive.current) return;
+      if (e.message === 'aborted') { setState('idle'); return; }
+      if (e.message === 'no-speech') { setTries((t) => t + 1); setState('silent'); return; }
+      // Didn't start / no permission / service error: fall back to recording on this device.
+      rememberSpeechMode('broken');
+      toRecordMode();
     }
   };
-  const fallback = !supported || state === 'fallback';
+
+  // --- record & compare ---
+  const record = async () => {
+    try {
+      setState('recording');
+      const r = await startRecording({ maxMs: 4000 });
+      recRef.current = r;
+      const url = await r.done;
+      recRef.current = null;
+      if (!alive.current) return;
+      if (!url) { setState('idle'); return; }
+      setClip((old) => { if (old) URL.revokeObjectURL(old); return url; });
+      setState('recorded');
+      setTimeout(() => playUrl(url), 200);
+    } catch {
+      if (!alive.current) return;
+      rememberSpeechMode('none');
+      setMode('none'); setState('idle');
+    }
+  };
+
+  const listening = state === 'listening' || state === 'recording';
   return (
     <div className="card pop">
       <Prompt he="עכשיו תורכם! אמרו בקול" young={young} />
       <div className="show-word"><span className="emoji-xl">{target.e}</span></div>
       <div className="intro-es"><Es>{target.es}</Es></div>
-      <div className="intro-he">{target.he}</div>
+      <div className="intro-he"><Mixed text={target.he} /></div>
       <div className="row center">
         <SoundButton text={target.es} rate={rate(young)} big />
         <SoundButton text={target.es} rate={0.5} big label="השמעה איטית" />
       </div>
-      {fallback ? (
+
+      {mode === null ? null : state === 'ok' ? (
+        <>
+          <div className="speak-ok">🎉 <bdi dir="ltr">¡Muy bien!</bdi> מצוין!</div>
+          <button className="btn primary wide" onClick={onDone}>המשך ←</button>
+        </>
+      ) : mode === 'none' ? (
         <>
           <p className="muted center-text">הקשיבו, ואז אמרו את המילה בקול רם 🗣️</p>
           <button className="btn primary wide" onClick={onDone}>אמרתי! ✔</button>
         </>
-      ) : state === 'ok' ? (
+      ) : listening ? (
         <>
-          <div className="speak-ok">🎉 ¡Muy bien! מצוין!</div>
-          <button className="btn primary wide" onClick={onDone}>המשך ←</button>
+          <button className="mic on" onClick={() => (state === 'recording' ? recRef.current?.stop() : cancelListening())} aria-label="עצירה">
+            {state === 'recording' ? '⏺' : '👂'}
+          </button>
+          <p className="center-text muted">{state === 'recording' ? 'מקליטים… דברו עכשיו! (לחצו כדי לעצור)' : 'מקשיבה לכם… (לחצו כדי לעצור)'}</p>
+        </>
+      ) : state === 'recorded' ? (
+        <>
+          <div className="row center wrap compare">
+            <button className="btn ghost" onClick={() => playUrl(clip)}>🧒 ההקלטה שלי</button>
+            <button className="btn ghost" onClick={() => speak(target.es, { rate: rate(young) })}>🦜 לולה</button>
+          </div>
+          <p className="center-text">זה נשמע אותו דבר?</p>
+          <div className="row center wrap">
+            <button className="btn ghost" onClick={record}>🎤 עוד פעם</button>
+            <button className="btn primary" onClick={() => { sfx.good(); onDone(); }}>כן! ✔</button>
+          </div>
         </>
       ) : (
         <>
-          <button className={`mic ${state === 'listening' ? 'on' : ''}`} onClick={go} disabled={state === 'listening'} aria-label="הקלטה">
-            {state === 'listening' ? '👂' : '🎤'}
-          </button>
-          <p className="center-text muted">{state === 'listening' ? 'מקשיבה לכם…' : 'לחצו על המיקרופון ודברו'}</p>
+          <button className="mic" onClick={mode === 'record' ? record : recognize} aria-label="הקלטה">🎤</button>
+          <p className="center-text muted">{mode === 'record' ? 'לחצו, אמרו את המילה, ואז השוו ללולה' : 'לחצו על המיקרופון ודברו'}</p>
           {state === 'retry' && (
             <p className="center-text">כמעט! הקשיבו שוב ונסו עוד פעם 💪 {heard && <span className="muted">(שמעתי: <Es>{heard}</Es>)</span>}</p>
           )}
           {state === 'silent' && <p className="center-text">לא שמעתי כלום 🙉 דברו קרוב למיקרופון ובקול רם</p>}
-          {tries >= 2 && state !== 'listening' && (
+          {tries >= 2 && (
             <div className="row center wrap">
               <button className="btn ghost" onClick={onDone}>אמרתי! ✔</button>
               <button className="btn ghost" onClick={onDone}>דלגו בינתיים ←</button>
             </div>
           )}
         </>
+      )}
+      {mode !== null && state !== 'ok' && !listening && state !== 'recorded' && mode !== 'none' && tries < 2 && (
+        <div className="center-text"><button className="link" onClick={onDone}>דלגו ←</button></div>
       )}
     </div>
   );

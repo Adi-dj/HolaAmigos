@@ -5,6 +5,7 @@ import { getCurrentUser } from '@/lib/auth';
 import { loadProgress, buildMap } from '@/lib/progress';
 import { TRACKS } from '@/lib/curriculum/index.js';
 import LogoutButton from '@/components/LogoutButton';
+import SpeechSettings from '@/components/SpeechSettings';
 
 export const dynamic = 'force-dynamic';
 
@@ -89,6 +90,7 @@ export default async function Home() {
           </div>
         </section>
       ))}
+      <SpeechSettings />
       <footer className="foot muted small">¡Hola Amigos! · שירים וסיפורים מנחלת הכלל</footer>
     </main>
   );
