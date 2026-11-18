@@ -26,7 +26,11 @@ function useAutoSpeak(seq, deps) {
   useEffect(() => {
     let alive = true;
     const t = setTimeout(async () => {
-      for (const [text, opts] of seq) { if (!alive) return; await speak(text, opts); }
+      for (let i = 0; i < seq.length; i++) {
+        if (!alive) return;
+        if (i) await new Promise((r) => setTimeout(r, 450)); // short pause between items
+        await speak(seq[i][0], seq[i][1]);
+      }
     }, 250);
     return () => { alive = false; clearTimeout(t); stopSpeaking(); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -510,7 +514,7 @@ export function Karaoke({ lines, title, origin, young, onNext }) {
       if (!playing.current) break;
       setActive(i);
       await speak(lines[i].es, { rate: slow ? 0.65 : 0.85 });
-      await new Promise((r) => setTimeout(r, 250));
+      await new Promise((r) => setTimeout(r, 650));
     }
     playing.current = false; setIsPlaying(false); setActive(-1);
   };

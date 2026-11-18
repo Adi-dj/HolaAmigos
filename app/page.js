@@ -29,6 +29,7 @@ export default async function Home() {
           </div>
         </div>
         <div className="row">
+          <a className="btn ghost small" href="#settings">🔠 הגדרות</a>
           {user.is_admin && <Link className="btn ghost small" href="/admin">⚙️ ניהול</Link>}
           <LogoutButton />
         </div>
